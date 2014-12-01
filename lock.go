@@ -144,8 +144,11 @@ func (lock *Lock) Unlock() error {
 func (lock *Lock) IsUnlocked() bool {
 	kvp, _, err := lock.client.KV().Get(lock.key, nil)
 	if err != nil {
-		return true
+		return false
 	}
+  if kvp == nil {
+    return false 
+  }
 	if kvp.Session != "" {
 		return false
 	}
