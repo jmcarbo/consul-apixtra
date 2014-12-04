@@ -44,6 +44,7 @@ func NewLock(client *consulapi.Client, key string) *Lock {
 
 func (lock *Lock) Lock(session *Session) error {
 	if lock.IsLeader() {
+		//log.Info("Lock is leader ------")
 		return nil
 	}
 	if session == nil && lock.session == nil {
@@ -58,13 +59,31 @@ func (lock *Lock) Lock(session *Session) error {
 		lock.session = session
 	}
 
+	if lock.session.IsHealthy() == false {
+		log.Error("Session not healthy")
+		lock.session.Destroy()
+		sess2 := NewSession(lock.client, "")
+		if sess2 == nil {
+			errors.New("Unable to get new session for lock")
+		}
+		lock.session = sess2
+		lock.bInternalSession = true
+	}
+
 	kvp, _, err := lock.client.KV().Get(lock.key, nil)
 	if err != nil {
 		return err
 	}
 
 	if kvp == nil {
-		return errors.New("Non existant key")
+		_, err := lock.client.KV().Put(&consulapi.KVPair{Key: lock.key}, nil)
+		if err != nil {
+			return errors.New("Non existant key")
+		}
+		kvp, _, err = lock.client.KV().Get(lock.key, nil)
+		if err != nil {
+			return err
+		}
 	}
 
 	kvp.Session = lock.session.sessionID
@@ -84,18 +103,26 @@ func (lock *Lock) IsLeader() bool {
 	opts := &consulapi.QueryOptions{RequireConsistent: true}
 	kvp, _, err := lock.client.KV().Get(lock.key, opts)
 	if err != nil {
+		//log.Error("@@@@@@@@ error getting log\n")
 		return false
 	}
 
 	if kvp == nil {
+		//log.Error("@@@@@@@@ key is nil\n")
 		return false
 	}
 
 	if lock.session == nil {
+		//log.Error("@@@@@@@@ session is nil\n")
 		return false
 	}
 
 	if kvp.Session != lock.session.sessionID {
+		//log.Error("@@@@@@@@ session not owned \n")
+		return false
+	}
+	if kvp.Session == "" {
+		//log.Error("@@@@@@@@ no sesson in key \n")
 		return false
 	}
 	return true
@@ -106,13 +133,15 @@ func (lock *Lock) IsLocked() error {
 		return errors.New("No session in lock")
 	}
 
-	kvp, _, err := lock.client.KV().Get(lock.key, nil)
+	opts := &consulapi.QueryOptions{RequireConsistent: true}
+	kvp, _, err := lock.client.KV().Get(lock.key, opts)
 	if err != nil {
 		return err
 	}
 	if kvp == nil {
 		return errors.New("Key does not exist")
 	}
+
 	if kvp.Session == "" {
 		return errors.New("Key not locked")
 	}
@@ -120,6 +149,7 @@ func (lock *Lock) IsLocked() error {
 	if kvp.Session != lock.session.sessionID {
 		return errors.New("key locked by another session")
 	}
+
 	return nil
 }
 
@@ -146,9 +176,9 @@ func (lock *Lock) IsUnlocked() bool {
 	if err != nil {
 		return false
 	}
-  if kvp == nil {
-    return false 
-  }
+	if kvp == nil {
+		return false
+	}
 	if kvp.Session != "" {
 		return false
 	}

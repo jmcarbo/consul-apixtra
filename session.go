@@ -49,7 +49,11 @@ func (sess *Session) checkID() string {
 }
 
 func (sess *Session) IsHealthy() bool {
-	se, _, err := sess.client.Session().Info(sess.sessionID, nil)
+	sesscli := sess.client.Session()
+	if sesscli == nil {
+		return false
+	}
+	se, _, err := sesscli.Info(sess.sessionID, nil)
 	if err != nil {
 		return false
 	}
@@ -57,7 +61,11 @@ func (sess *Session) IsHealthy() bool {
 		log.Error("Cannot find session ", sess.sessionName)
 		return false
 	}
-	checks, err := sess.client.Agent().Checks()
+	agentcli := sess.client.Agent()
+	if agentcli == nil {
+		return false
+	}
+	checks, err := agentcli.Checks()
 	if err != nil {
 		log.Error("Cannot find checks ", err)
 		return false
@@ -87,7 +95,9 @@ func (sess *Session) maintainCheck() error {
 			select {
 			case <-ticker.C:
 				if err := agent.PassTTL(checkID, ""); err != nil {
-					log.Printf("[ERR] Failed to update check TTL: %v", err)
+					agent.CheckDeregister(checkID)
+					log.Errorf("[ERR] Failed to update check TTL: %v", err)
+					return
 				}
 			case <-sess.doneCh:
 				return
